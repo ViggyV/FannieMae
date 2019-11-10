@@ -25,13 +25,14 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 #%matplotlib inline
 
-def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names=['negative','positive'],drop_cols=[],target_label=1):
+def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names,drop_cols,target_label):
     df = pd.read_csv(csv_url, na_values=['?'])
-    if dataset_name == 'emotions':
-        df['label'] = [0 if x == 'NEGATIVE' else 1 if x == 'NEUTRAL' else 2 for x in df['label']]
+    print(df.columns)
+    '''if dataset_name == 'emotions':
+        df['Current_Status'] = [0 if x == 'NEGATIVE' else 1 if x == 'NEUTRAL' else 2 for x in df['Current_Status']]
     else:
-        df['label'] = [0 if x == class_names[0] else 1 if x == class_names[1] else 2 for x in df['label']]
-
+        df['Current_Status'] = [0 if x == class_names[0] else 1 if x == class_names[1] else 2 for x in df['Current_Status']]
+        '''
 
     if len(drop_cols) > 0:
         df = df.drop(drop_cols,1)
@@ -77,48 +78,53 @@ def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names
             lst = sorted(df[col].unique())
             if len(lst) == 2:
                 cols_to_drop.append('{0}_{1}'.format(col, lst[0]))
-
     dic_distinct_vals = {}
     for c in categorical_columns:
         dic_distinct_vals[c] = df[c].unique()
+    print(df.columns)
     for col in numeric_columns:
         df[col] = pd.qcut(df[col],4,labels=False,duplicates='drop')
     df = dummy_df(df, categorical_columns)
     df = df.drop(cols_to_drop, 1)
+    df = df.rename(columns=lambda x: x.replace('<', ''))
+    X = df.drop('Current_Status', axis=1)
 
-    X = df.drop(['label'], 1)
-    Y = df['label']
+    Y = df['Current_Status']
 
     X_train, X_test, Y_train, Y_test = sklearn.model_selection.train_test_split(X, Y, stratify=Y, train_size=0.80,random_state = 1)
-    #xgboost_gridCV(X_train.drop(['id'],axis=1).values,Y_train.values)
+    #xgboost_gridCV(X_train.drop(['Loan_ID'],axis=1).values,Y_train.values)
 
+    
+   
     clf = xgboost.XGBClassifier(num_class=4, objective='multi:softmax',n_estimators=2500)
 #errrrrrror
     #xgb_param = clf.get_xgb_params()
     #xgb_param['num_class'] = 2
     ##cvresult = xgb.cv(xgb_param, ...)
-    clf.fit(X_train.drop(['id'], axis=1).values, Y_train.values)
+    print(X_train.info(verbose=True))
+    clf.fit(X_train.values, Y_train.values)
 
     #clf = SVC(kernel='poly', degree=1, gamma=0.01, C=1000, probability=True)
-    #clf.fit(X_train.drop(['id'], 1).values, Y_train.values)
+    #clf.fit(X_train.values, Y_train.values)
 
-    print(sklearn.metrics.accuracy_score(Y_test.values, clf.predict(X_test.drop(['id'], axis=1).values)))
+    print(sklearn.metrics.accuracy_score(Y_test.values, clf.predict(X_test.values)))
 
-    Y_hat = clf.predict_proba(X.drop(['id'], axis=1).values)
-    predict_fn = lambda x: clf.predict_proba(x).astype(float)
+    #Y_hat = clf.predict_proba(X).values
+    #predict_fn = lambda x: clf.predict_proba(x).astype(float)
 
 
-    print('Train', accuracy_score(Y_train.values, clf.predict(X_train.drop(['id'], 1).values)))
-    print('Test', accuracy_score(Y_test.values, clf.predict(X_test.drop(['id'], 1).values)))
+    print('Train', accuracy_score(Y_train.values, clf.predict(X_train.values)))
+    print('Test', accuracy_score(Y_test.values, clf.predict(X_test.values)))
+    print(Y_train.describe())
     #v change
-   # print(classification_report(Y_test.values, clf.predict(X_test.drop(['id'], 1).values), target_names=['NEGATIVE', 'NEUTRAL','POSITIVE']))
-    print(classification_report(Y_test.values, clf.predict(X_test.drop(['id'], 1).values), target_names=['NEGATIVE','POSITIVE']))
-    print(confusion_matrix(Y_test.values, clf.predict(X_test.drop(['id'], 1).values)))
+   # print(classification_report(Y_test.values, clf.predict(X_test.values), target_names=['NEGATIVE', 'NEUTRAL','POSITIVE']))
+    print(classification_report(Y_test.values, clf.predict(X_test.values), target_names=['Prepaid','Underperformed', 'Current']))
+    print(confusion_matrix(Y_test.values, clf.predict(X_test.values)))
 
-    explainer_shap = shap.TreeExplainer(clf, X_train.drop(['id'], 1).values)
-    shap_values = explainer_shap.shap_values(X_train.drop(['id'], 1).values)
+    explainer_shap = shap.TreeExplainer(clf, X_train.values)
+    shap_values = explainer_shap.shap_values(X_train.values)
 
-    shap_vals_ids = np.append(X_train['id'].values.reshape(-1,1),shap_values,1)
+    # shap_vals_ids = np.append(X_train['Loan_ID'].values.reshape(-1,1),shap_values,1)
 
 
     file_train = open('{0}_train.pl'.format(dataset_name), 'w')
@@ -166,18 +172,18 @@ def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names
     itemset_columns = []
     i = 0
     for row_index, row in X_train.iterrows():
-        id = int(row['id'])
-        label = ''
+        id = int(row['Loan_ID'])
+        Current_Status = ''
         if Y_train[row_index] == target_label:
-            label = 'positive'
+            Current_Status = 'Underperformed'
         #elif Y_train[row_index] == 0:
         else:
-            label = 'negative'
-        file_train.write('{0}(p{1}).\n'.format(label,id))
+            Current_Status = 'negative'
+        file_train.write('{0}(p{1}).\n'.format(Current_Status,id))
         sum_shap_neg,sum_shap_pos = (0,0)
         col_list = [[],[]]
         util_list = [[],[]]
-        for col_index,col in enumerate(X_train.drop(['id'],1).columns):
+        for col_index,col in enumerate(X_train.drop(['Loan_ID'],1).columns):
             index_2_colname[col_index] = col
             if col in numeric_columns:
                 file_train.write('{0}(p{1},{2}).\n'.format(col, id, row[col]))
@@ -186,11 +192,11 @@ def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names
                 if num_col not in itemset_columns:
                     itemset_columns.append(num_col)
 
-                if label == 'positive' and shap_values[i][col_index] > 0:
+                if Current_Status == 'Underperformed' and shap_values[i][col_index] > 0:
                     sum_shap_pos += int(round(shap_values[i][col_index], 3) * 1000)
                     col_list[1].append(itemset_columns.index(num_col))
                     util_list[1].append(int(round(shap_values[i][col_index], 3) * 1000))
-                elif label == 'negative' and shap_values[i][col_index] < 0:
+                elif Current_Status == 'negative' and shap_values[i][col_index] < 0:
                     sum_shap_neg += abs(int(round(shap_values[i][col_index], 3) * 1000))
                     col_list[0].append(itemset_columns.index(num_col))
                     util_list[0].append(int(abs(round(shap_values[i][col_index], 3)) * 1000))
@@ -203,11 +209,11 @@ def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names
                     file_shap.write('data(p{0}):{1}(A,{2}):{3} \n'.format(id, pred_name, second_arg, shap_values[i][col_index]))
                     if col not in itemset_columns:
                         itemset_columns.append(col)
-                    if label == 'positive' and shap_values[i][col_index] > 0:
+                    if Current_Status == 'Underperformed' and shap_values[i][col_index] > 0:
                         sum_shap_pos += int(round(shap_values[i][col_index], 3) * 1000)
                         col_list[1].append(itemset_columns.index(col))
                         util_list[1].append(int(round(shap_values[i][col_index], 3) * 1000))
-                    elif label == 'negative' and shap_values[i][col_index] < 0:
+                    elif Current_Status == 'negative' and shap_values[i][col_index] < 0:
                         sum_shap_neg += abs(int(round(shap_values[i][col_index], 3) * 1000))
                         col_list[0].append(itemset_columns.index(col))
                         util_list[0].append(int(abs(round(shap_values[i][col_index], 3)) * 1000))
@@ -220,9 +226,9 @@ def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names
         zipped_1 = zipped_1[:min(len(zipped_1), 100)]
         sum_shap_pos = sum([x[1] for x in zipped_1])
         sum_shap_neg = sum([x[1] for x in zipped_0])
-        if label == 'positive':
+        if Current_Status == 'Underperformed':
             file_itemset_mining.write('positive(p{0})::{1}:{2}:{3}\n'.format(id," ".join(str(item) for item in [x[0] for x in zipped_1]),str(sum_shap_pos)," ".join(str(item) for item in [x[1] for x in zipped_1])))
-        elif label == 'negative':
+        else:
             file_itemset_mining.write('positive(p{0})::{1}:{2}:{3}\n'.format(id," ".join(str(item) for item in [x[0] for x in zipped_0]),str(round(sum_shap_neg,2))," ".join(str(item) for item in [x[1] for x in zipped_0])))
 
 
@@ -230,7 +236,7 @@ def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names
 
 
     for index, row in X_test.iterrows():
-        id = int(row['id'])
+        id = int(row['Loan_ID'])
         if Y_test[index] == target_label:
             file_test.write('positive(p{0}).\n'.format(id))
         #elif Y_test[index] == 0:
@@ -238,7 +244,7 @@ def generate_data(dataset_name,csv_url,numeric_cols,categorical_cols,class_names
             file_test.write('negative(p{0}).\n'.format(id))
 
         for col in X_test.columns:
-            if col == 'id':
+            if col == 'Loan_ID':
                 continue
             if col in numeric_columns:
                 file_test.write('{0}(p{1},{2}).\n'.format(col, id, row[col]))
@@ -288,7 +294,8 @@ def xgboost_gridCV(X_train,Y_train):
 def dummy_df(df, todummy_list):
     for x in todummy_list:
         dummies = pd.get_dummies(df[x], prefix=x, dummy_na=False)
-        df = df.drop(x, 1)
+        if x is not 'Current_Status':
+            df = df.drop(x, 1)
         df = pd.concat([df, dummies], axis=1)
     return df
 
@@ -394,7 +401,7 @@ def main():
 
 ## create a mapping of the available zero_balance_code numbers and their meanings
 ##
-    zero_bal_cd_map = {0:'Current',1:'Prepaid',2:'Third Party Sale',3:'Short Sale',
+    zero_bal_cd_map = {0:'Current',1:'Underperformed',2:'Third Party Sale',3:'Short Sale',
                    6:'Repurchase',9:'REO',15:'Note Sale',16:'RPL Loan Sale'}
     perf_df_new['Zero_Bal_Cd'] = perf_df_new['Zero_Bal_Cd'].map(zero_bal_cd_map).apply(str)
 
@@ -454,14 +461,14 @@ def main():
     ## to each record in the dataframe
     ##
     FICO_bins = [0,620,660,700,740,780,850]
-    FICO_labels = ['0-620', '620-660','660-700','700-740','740-780','780+']
-    loan_df['FICO_bins'] = pd.cut(loan_df['Borrower_FICO'],bins=FICO_bins,labels=FICO_labels)
+    FICO_Current_Statuss = ['0-620', '620-660','660-700','700-740','740-780','780+']
+    loan_df['FICO_bins'] = pd.cut(loan_df['Borrower_FICO'],bins=FICO_bins,Current_Statuss=FICO_Current_Statuss)
 
     Term_bins =[0,180,360]
-    Term_labels =['<=15 Years','<= 30 Years']
-    loan_df['Term_bins'] = pd.cut(loan_df['Loan_Term'],bins=Term_bins,labels=Term_labels)
+    Term_Current_Statuss =['<=15 Years','<= 30 Years']
+    loan_df['Term_bins'] = pd.cut(loan_df['Loan_Term'],bins=Term_bins,Current_Statuss=Term_Current_Statuss)
 
-    zero_bal_cd_map = {'Current':'Current','Prepaid':'Prepaid','Third Party Sale':'Underperforming','Short Sale':'Underperforming',
+    zero_bal_cd_map = {'Current':'Current','Underperformed':'Underperformed','Third Party Sale':'Underperforming','Short Sale':'Underperforming',
                    'Repurchase':'Underperforming','REO':'Underperforming','Note Sale':'Underperforming','RPL Loan Sale':'Underperforming'}
     loan_df['Current_Status'] = loan_df['Zero_Bal_Cd'].map(zero_bal_cd_map).apply(str)
 
@@ -523,10 +530,10 @@ def main():
     dataset_name = 'fanniemae'
     csv_url = 'Processed_loans.csv'
     numeric_cols = ['Interest_Rate','UPB','Loan_Term','LTV','CLTV','Num_Borrowers','DTI','Borrower_FICO','Unit_Count','Period','Current_IR','Current_UPB','Age','Origin_Month']
-    categorical_cols = ['Channel,''Seller','First_Time_Buyer','Loan_Purpose','Dwelling_Type','Occupancy','State','Product','Mortgage_Insurance_Type','Relocation_Indicator','Mod_Ind','Zero_Bal_Cd','FICO_bins','Term_bins','Current_Status',]
+    categorical_cols = ['Channel','Seller','First_Time_Buyer','Loan_Purpose','Dwelling_Type','Occupancy','State','Product','Mortgage_Insurance_Type','Relocation_Indicator','Mod_Ind','Zero_Bal_Cd','FICO_bins','Term_bins']
 
-    class_names = ['Prepaid','Current','Underperforming']
-    drop_cols = ['Loan_ID','Origination_Date','Origination_Date','Zip','Insurance%','Origin_Year']
+    class_names = ['Current', 'REO', 'Repurchase', 'RPL Loan Sale', 'Short Sale', 'Third Party','Prepaid']
+    drop_cols = ['Origination_Date','Origination_Date','Zip','Insurance%','Origin_Year','First_Payment_Date']
 
     generate_data(dataset_name,csv_url=csv_url,numeric_cols=numeric_cols,
                   categorical_cols=categorical_cols,
@@ -648,14 +655,14 @@ def main():
     #numeric_cols = []
     #categorical_cols = ['buying','maint','doors','persons','lugboot','safety']
     #drop_cols = []
-	#class_names = ['negative','positive']
+	#class_names = ['negative','Underperformed']
 	########################## UCI CARS DATASET ############################
 
     '''generate_data(dataset_name,csv_url=csv_url,numeric_cols=numeric_cols,
                   categorical_cols=categorical_cols,
                   class_names=class_names,
                   drop_cols=drop_cols,
-                  target_label=1)'''
+                  target_Current_Status=1)'''
 
 if __name__ == "__main__":
     main()
